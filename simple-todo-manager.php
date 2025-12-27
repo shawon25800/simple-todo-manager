@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Day 11: অ্যাডমিন মেনু + টুডু পেজ
+// Day 11: অ্যাডমিন মেনু – আইকন ছাড়া
 function stm_admin_menu() {
     add_menu_page(
         'Todo Manager',
@@ -22,25 +22,241 @@ function stm_admin_menu() {
         'manage_options',
         'simple-todo-manager',
         'stm_todo_page',
-        'dashicons-list-view',
+        '',
         80
     );
 }
 add_action('admin_menu', 'stm_admin_menu');
 
-// Day 11: টুডু পেজ
+// Day 13: টুডু পেজ – glassmorphism box on white background
 function stm_todo_page() {
     ?>
-    <div class="wrap">
-        <h1>📋 My Todo List</h1>
-        <div id="todo-app" style="max-width:800px; margin:0 auto;">
-            <div style="margin-bottom:30px;">
-                <input type="text" id="new-todo" placeholder="Add new task..." style="width:70%; padding:12px; font-size:16px;" />
-                <button id="add-todo" style="padding:12px 20px; background:#2271b1; color:white; border:none; font-size:16px;">Add Task</button>
+    <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
+        <div style="width:100%; max-width:700px; background:rgba(255,255,255,0.7); border-radius:25px; padding:50px 40px; box-shadow:0 20px 50px rgba(0,0,0,0.1); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(0,0,0,0.05);">
+            <h1 style="text-align:center; color:#333; font-size:36px; margin-bottom:50px;">My Todo List</h1>
+
+            <div id="todo-app">
+                <div style="margin-bottom:40px; text-align:center;">
+                    <input type="text" id="new-todo" placeholder="Add new task..." style="width:70%; padding:16px 20px; font-size:18px; border:none; border-radius:15px; background:rgba(255,255,255,0.8); color:#333; outline:none; box-shadow:0 5px 15px rgba(0,0,0,0.1);" />
+                    <button id="add-todo" style="padding:16px 30px; margin-left:10px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:18px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">Add Task</button>
+                </div>
+
+                <ul id="todo-list" style="list-style:none; padding:0;"></ul>
+
+                <div id="progress" style="margin-top:50px; text-align:center; color:#555; font-size:20px;"></div>
             </div>
-            <ul id="todo-list" style="list-style:none; padding:0;"></ul>
-            <div id="progress" style="margin-top:30px; text-align:center;"></div>
         </div>
     </div>
     <?php
 }
+
+// Day 12: টুডু ডাটা সেভ + লোড
+function stm_get_todos() {
+    $todos = get_user_meta(get_current_user_id(), 'stm_todos', true);
+    return $todos ? $todos : array();
+}
+
+function stm_save_todos($todos) {
+    update_user_meta(get_current_user_id(), 'stm_todos', $todos);
+}
+
+// Day 12: AJAX - নতুন টাস্ক অ্যাড
+function stm_add_todo() {
+    check_ajax_referer('stm_nonce', 'nonce');
+
+    $text = sanitize_text_field($_POST['text']);
+    if (empty($text)) {
+        wp_send_json_error('Task cannot be empty');
+    }
+
+    $todos = stm_get_todos();
+    $todos[] = array(
+        'id' => time(),
+        'text' => $text,
+        'completed' => false
+    );
+
+    stm_save_todos($todos);
+    wp_send_json_success($todos);
+}
+add_action('wp_ajax_stm_add_todo', 'stm_add_todo');
+
+// Day 12: AJAX - টুডু লোড
+function stm_load_todos() {
+    wp_send_json_success(stm_get_todos());
+}
+add_action('wp_ajax_stm_load_todos', 'stm_load_todos');
+
+// Day 13: AJAX - কমপ্লিট মার্ক টগল
+function stm_toggle_complete() {
+    check_ajax_referer('stm_nonce', 'nonce');
+
+    $todo_id = intval($_POST['todo_id']);
+
+    $todos = stm_get_todos();
+
+    foreach ($todos as &$todo) {
+        if ($todo['id'] == $todo_id) {
+            $todo['completed'] = !$todo['completed'];
+            break;
+        }
+    }
+
+    stm_save_todos($todos);
+    wp_send_json_success($todos);
+}
+add_action('wp_ajax_stm_toggle_complete', 'stm_toggle_complete');
+
+// Day 13: AJAX - টাস্ক ডিলিট
+function stm_delete_todo() {
+    check_ajax_referer('stm_nonce', 'nonce');
+
+    $todo_id = intval($_POST['todo_id']);
+
+    $todos = stm_get_todos();
+    $new_todos = array();
+
+    foreach ($todos as $todo) {
+        if ($todo['id'] != $todo_id) {
+            $new_todos[] = $todo;
+        }
+    }
+
+    stm_save_todos($new_todos);
+    wp_send_json_success($new_todos);
+}
+add_action('wp_ajax_stm_delete_todo', 'stm_delete_todo');
+
+// Day 13: Enqueue scripts + glassmorphism task cards
+function stm_enqueue_scripts($hook) {
+    if ($hook !== 'toplevel_page_simple-todo-manager') {
+        return;
+    }
+
+    wp_enqueue_script('jquery');
+
+    wp_add_inline_script('jquery', '
+        jQuery(document).ready(function($) {
+            var nonce = "' . wp_create_nonce('stm_nonce') . '";
+
+            function loadTodos() {
+                $.post(ajaxurl, {
+                    action: "stm_load_todos",
+                    nonce: nonce
+                }, function(response) {
+                    if (response.success) {
+                        renderTodos(response.data);
+                        updateProgress(response.data);
+                    }
+                });
+            }
+
+            function renderTodos(todos) {
+                var list = $("#todo-list");
+                list.empty();
+
+                todos.forEach(function(todo) {
+                    var li = $("<li>").attr("data-id", todo.id).css({
+                        padding: "25px",
+                        background: "rgba(255,255,255,0.8)",
+                        margin: "20px 0",
+                        borderRadius: "20px",
+                        boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
+                        display: "flex",
+                        alignItems: "center",
+                        color: "#333"
+                    });
+
+                    var checkbox = $("<input type=\'checkbox\'>").prop("checked", todo.completed).css({
+                        width: "22px",
+                        height: "22px",
+                        cursor: "pointer"
+                    });
+
+                    checkbox.on("change", function() {
+                        $.post(ajaxurl, {
+                            action: "stm_toggle_complete",
+                            todo_id: todo.id,
+                            nonce: nonce
+                        }, function(response) {
+                            if (response.success) {
+                                renderTodos(response.data);
+                                updateProgress(response.data);
+                            }
+                        });
+                    });
+
+                    var text = $("<span>").text(todo.text).css({
+                        "flex": "1",
+                        "margin-left": "20px",
+                        "font-size": "18px",
+                        "font-weight": "500"
+                    });
+
+                    if (todo.completed) {
+                        text.css("text-decoration", "line-through").css("opacity", "0.6");
+                    }
+
+                    var deleteBtn = $("<button>").text("Delete").css({
+                        marginLeft: "20px",
+                        background: "#e74c3c",
+                        color: "white",
+                        border: "none",
+                        padding: "10px 20px",
+                        borderRadius: "12px",
+                        cursor: "pointer"
+                    });
+
+                    deleteBtn.on("click", function() {
+                        if (confirm("Delete this task?")) {
+                            $.post(ajaxurl, {
+                                action: "stm_delete_todo",
+                                todo_id: todo.id,
+                                nonce: nonce
+                            }, function(response) {
+                                if (response.success) {
+                                    renderTodos(response.data);
+                                    updateProgress(response.data);
+                                }
+                            });
+                        }
+                    });
+
+                    li.append(checkbox, text, deleteBtn);
+                    list.append(li);
+                });
+            }
+
+            function updateProgress(todos) {
+                var completed = todos.filter(t => t.completed).length;
+                var total = todos.length;
+                var percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                $("#progress").html("<strong>Progress: " + completed + "/" + total + " (" + percent + "%)</strong>");
+            }
+
+            loadTodos();
+
+            $("#add-todo").on("click", function() {
+                var text = $("#new-todo").val().trim();
+                if (!text) return;
+
+                $.post(ajaxurl, {
+                    action: "stm_add_todo",
+                    text: text,
+                    nonce: nonce
+                }, function(response) {
+                    if (response.success) {
+                        $("#new-todo").val("");
+                        renderTodos(response.data);
+                        updateProgress(response.data);
+                    }
+                });
+            });
+
+            $("#new-todo").on("keypress", function(e) {
+                if (e.which == 13) $("#add-todo").click();
+            });
+        });
+    ');
+}
+add_action('admin_enqueue_scripts', 'stm_enqueue_scripts');
