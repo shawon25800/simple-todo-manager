@@ -28,23 +28,32 @@ function stm_admin_menu() {
 }
 add_action('admin_menu', 'stm_admin_menu');
 
-// Day 13: টুডু পেজ – glassmorphism box on white background
+// Day 13: টুডু পেজ – glassmorphism style
 function stm_todo_page() {
     ?>
     <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
-        <div style="width:100%; max-width:700px; background:rgba(255,255,255,0.7); border-radius:25px; padding:50px 40px; box-shadow:0 20px 50px rgba(0,0,0,0.1); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(0,0,0,0.05);">
+        <div style="width:100%; max-width:700px; background:rgba(255,255,255,0.95); border-radius:25px; padding:50px 40px; box-shadow:0 20px 50px rgba(0,0,0,0.1); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
             <h1 style="text-align:center; color:#333; font-size:36px; margin-bottom:50px;">My Todo List</h1>
 
             <div id="todo-app">
                 <div style="margin-bottom:40px; text-align:center;">
-                    <input type="text" id="new-todo" placeholder="Add new task..." style="width:70%; padding:16px 20px; font-size:18px; border:none; border-radius:15px; background:rgba(255,255,255,0.8); color:#333; outline:none; box-shadow:0 5px 15px rgba(0,0,0,0.1);" />
-                    <button id="add-todo" style="padding:16px 30px; margin-left:10px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:18px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">Add Task</button>
+                    <input type="text" id="new-todo" placeholder="Add new task..." style="width:70%; padding:18px 25px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4; color:#333; outline:none; box-shadow:0 5px 15px rgba(0,0,0,0.1);" />
+                    <button id="add-todo" style="padding:18px 30px; margin-left:10px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:18px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">Add Task</button>
                 </div>
 
                 <ul id="todo-list" style="list-style:none; padding:0;"></ul>
 
                 <div id="progress" style="margin-top:50px; text-align:center; color:#555; font-size:20px;"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Dialog – perfect center -->
+    <div id="custom-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
+        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 15px 40px rgba(0,0,0,0.3); text-align:center; max-width:400px; width:90%;">
+            <p style="font-size:20px; margin-bottom:40px; color:#333;">Are you sure you want to delete this task?</p>
+            <button id="confirm-yes" style="padding:12px 30px; background:#e74c3c; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Yes, Delete</button>
+            <button id="confirm-no" style="padding:12px 30px; background:#95a5a6; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Cancel</button>
         </div>
     </div>
     <?php
@@ -127,7 +136,7 @@ function stm_delete_todo() {
 }
 add_action('wp_ajax_stm_delete_todo', 'stm_delete_todo');
 
-// Day 13: Enqueue scripts + glassmorphism task cards
+// Day 13: Enqueue scripts + custom dialog
 function stm_enqueue_scripts($hook) {
     if ($hook !== 'toplevel_page_simple-todo-manager') {
         return;
@@ -138,6 +147,7 @@ function stm_enqueue_scripts($hook) {
     wp_add_inline_script('jquery', '
         jQuery(document).ready(function($) {
             var nonce = "' . wp_create_nonce('stm_nonce') . '";
+            var pendingDeleteId = null;
 
             function loadTodos() {
                 $.post(ajaxurl, {
@@ -158,7 +168,7 @@ function stm_enqueue_scripts($hook) {
                 todos.forEach(function(todo) {
                     var li = $("<li>").attr("data-id", todo.id).css({
                         padding: "25px",
-                        background: "rgba(255,255,255,0.8)",
+                        background: "rgba(255,255,255,0.9)",
                         margin: "20px 0",
                         borderRadius: "20px",
                         boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
@@ -208,18 +218,8 @@ function stm_enqueue_scripts($hook) {
                     });
 
                     deleteBtn.on("click", function() {
-                        if (confirm("Delete this task?")) {
-                            $.post(ajaxurl, {
-                                action: "stm_delete_todo",
-                                todo_id: todo.id,
-                                nonce: nonce
-                            }, function(response) {
-                                if (response.success) {
-                                    renderTodos(response.data);
-                                    updateProgress(response.data);
-                                }
-                            });
-                        }
+                        pendingDeleteId = todo.id;
+                        $("#custom-confirm").fadeIn(200);
                     });
 
                     li.append(checkbox, text, deleteBtn);
@@ -233,6 +233,28 @@ function stm_enqueue_scripts($hook) {
                 var percent = total > 0 ? Math.round((completed / total) * 100) : 0;
                 $("#progress").html("<strong>Progress: " + completed + "/" + total + " (" + percent + "%)</strong>");
             }
+
+            $("#confirm-yes").on("click", function() {
+                if (pendingDeleteId !== null) {
+                    $.post(ajaxurl, {
+                        action: "stm_delete_todo",
+                        todo_id: pendingDeleteId,
+                        nonce: nonce
+                    }, function(response) {
+                        if (response.success) {
+                            renderTodos(response.data);
+                            updateProgress(response.data);
+                        }
+                    });
+                }
+                $("#custom-confirm").fadeOut(200);
+                pendingDeleteId = null;
+            });
+
+            $("#confirm-no").on("click", function() {
+                $("#custom-confirm").fadeOut(200);
+                pendingDeleteId = null;
+            });
 
             loadTodos();
 
