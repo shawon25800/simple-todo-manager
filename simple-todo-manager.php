@@ -47,6 +47,14 @@ function stm_todo_page() {
             </div>
         </div>
     </div>
+    <style>
+    #todo-list li {
+        cursor: move;
+    }
+    .sortable-ghost {
+        opacity: 0.4;
+    }
+</style>
 
     <!-- Custom Confirm Dialog – perfect center -->
     <div id="custom-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
@@ -136,7 +144,6 @@ function stm_delete_todo() {
 }
 add_action('wp_ajax_stm_delete_todo', 'stm_delete_todo');
 
-// Day 13: Enqueue scripts + custom dialog
 function stm_enqueue_scripts($hook) {
     if ($hook !== 'toplevel_page_simple-todo-manager') {
         return;
@@ -144,10 +151,12 @@ function stm_enqueue_scripts($hook) {
 
     wp_enqueue_script('jquery');
 
+    // Sortable.js CDN – stable version
+    wp_enqueue_script('sortable-js', 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js', array(), '1.15.2', true);
+
     wp_add_inline_script('jquery', '
         jQuery(document).ready(function($) {
             var nonce = "' . wp_create_nonce('stm_nonce') . '";
-            var pendingDeleteId = null;
 
             function loadTodos() {
                 $.post(ajaxurl, {
@@ -157,6 +166,7 @@ function stm_enqueue_scripts($hook) {
                     if (response.success) {
                         renderTodos(response.data);
                         updateProgress(response.data);
+                        initSortable(); // render-এর পরে initialize
                     }
                 });
             }
@@ -174,7 +184,8 @@ function stm_enqueue_scripts($hook) {
                         boxShadow: "0 10px 30px rgba(0,0,0,0.1)",
                         display: "flex",
                         alignItems: "center",
-                        color: "#333"
+                        color: "#333",
+                        cursor: "move" // drag icon
                     });
 
                     var checkbox = $("<input type=\'checkbox\'>").prop("checked", todo.completed).css({
@@ -234,46 +245,36 @@ function stm_enqueue_scripts($hook) {
                 $("#progress").html("<strong>Progress: " + completed + "/" + total + " (" + percent + "%)</strong>");
             }
 
-            $("#confirm-yes").on("click", function() {
-                if (pendingDeleteId !== null) {
-                    $.post(ajaxurl, {
-                        action: "stm_delete_todo",
-                        todo_id: pendingDeleteId,
-                        nonce: nonce
-                    }, function(response) {
-                        if (response.success) {
-                            renderTodos(response.data);
-                            updateProgress(response.data);
+            // Day 14: Drag & Drop initialize
+            function initSortable() {
+                var el = document.getElementById("todo-list");
+                if (el && typeof Sortable !== "undefined") {
+                    Sortable.create(el, {
+                        animation: 150,
+                        ghostClass: "sortable-ghost",
+                        onEnd: function () {
+                            var order = [];
+                            $("#todo-list li").each(function() {
+                                order.push($(this).data("id"));
+                            });
+
+                            $.post(ajaxurl, {
+                                action: "stm_update_todo_order",
+                                order: order,
+                                nonce: nonce
+                            });
                         }
                     });
                 }
-                $("#custom-confirm").fadeOut(200);
-                pendingDeleteId = null;
-            });
+            }
 
-            $("#confirm-no").on("click", function() {
-                $("#custom-confirm").fadeOut(200);
-                pendingDeleteId = null;
-            });
+            // Confirm buttons...
+            $("#confirm-yes").on("click", function() { /* তোমার আগের কোড */ });
+            $("#confirm-no").on("click", function() { /* তোমার আগের কোড */ });
 
             loadTodos();
 
-            $("#add-todo").on("click", function() {
-                var text = $("#new-todo").val().trim();
-                if (!text) return;
-
-                $.post(ajaxurl, {
-                    action: "stm_add_todo",
-                    text: text,
-                    nonce: nonce
-                }, function(response) {
-                    if (response.success) {
-                        $("#new-todo").val("");
-                        renderTodos(response.data);
-                        updateProgress(response.data);
-                    }
-                });
-            });
+            $("#add-todo").on("click", function() { /* তোমার আগের কোড */ });
 
             $("#new-todo").on("keypress", function(e) {
                 if (e.which == 13) $("#add-todo").click();
@@ -282,3 +283,25 @@ function stm_enqueue_scripts($hook) {
     ');
 }
 add_action('admin_enqueue_scripts', 'stm_enqueue_scripts');
+// Day 14: AJAX - টাস্ক অর্ডার সেভ
+function stm_update_todo_order() {
+    check_ajax_referer('stm_nonce', 'nonce');
+
+    $order = array_map('intval', $_POST['order']);
+
+    $todos = stm_get_todos();
+    $ordered_todos = [];
+
+    foreach ($order as $id) {
+        foreach ($todos as $todo) {
+            if ($todo['id'] == $id) {
+                $ordered_todos[] = $todo;
+                break;
+            }
+        }
+    }
+
+    stm_save_todos($ordered_todos);
+    wp_send_json_success();
+}
+add_action('wp_ajax_stm_update_todo_order', 'stm_update_todo_order');
