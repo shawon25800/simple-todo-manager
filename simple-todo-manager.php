@@ -28,7 +28,7 @@ function stm_admin_menu() {
 }
 add_action('admin_menu', 'stm_admin_menu');
 
-// Day 13: টুডু পেজ – glassmorphism style
+// Day 15: টুডু পেজ – glassmorphism + inline edit
 function stm_todo_page() {
     ?>
     <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
@@ -64,6 +64,34 @@ function stm_todo_page() {
         .sortable-ghost {
             opacity: 0.4;
         }
+        .edit-form {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+        }
+        .edit-form input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        .edit-form input[type="text"] {
+            flex: 1;
+        }
+        .edit-form button {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            color: white;
+        }
+        .edit-form .save-btn {
+            background: #27ae60;
+        }
+        .edit-form .cancel-btn {
+            background: #95a5a6;
+        }
     </style>
     <?php
 }
@@ -91,7 +119,8 @@ function stm_add_todo() {
     $todos[] = array(
         'id' => time(),
         'text' => $text,
-        'completed' => false
+        'completed' => false,
+        'due_date' => null
     );
 
     stm_save_todos($todos);
@@ -168,7 +197,30 @@ function stm_update_todo_order() {
 }
 add_action('wp_ajax_stm_update_todo_order', 'stm_update_todo_order');
 
-// Day 14: Enqueue + Full JS with Drag & Drop + Fixed Confirm
+// Day 15: AJAX - টাস্ক এডিট + due date
+function stm_edit_todo() {
+    check_ajax_referer('stm_nonce', 'nonce');
+
+    $todo_id = intval($_POST['todo_id']);
+    $text = sanitize_text_field($_POST['text']);
+    $due_date = sanitize_text_field($_POST['due_date']);
+
+    $todos = stm_get_todos();
+
+    foreach ($todos as &$todo) {
+        if ($todo['id'] == $todo_id) {
+            $todo['text'] = $text;
+            $todo['due_date'] = $due_date ?: null;
+            break;
+        }
+    }
+
+    stm_save_todos($todos);
+    wp_send_json_success($todos);
+}
+add_action('wp_ajax_stm_edit_todo', 'stm_edit_todo');
+
+// Day 15: Enqueue + Flatpickr + Inline Edit
 function stm_enqueue_scripts($hook) {
     if ($hook !== 'toplevel_page_simple-todo-manager') {
         return;
@@ -176,6 +228,10 @@ function stm_enqueue_scripts($hook) {
 
     wp_enqueue_script('jquery');
     wp_enqueue_script('sortable-js', 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js', array('jquery'), '1.15.2', true);
+
+    // Flatpickr for date picker
+    wp_enqueue_style('flatpickr-css', 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css');
+    wp_enqueue_script('flatpickr-js', 'https://cdn.jsdelivr.net/npm/flatpickr', array('jquery'), null, true);
 
     wp_add_inline_script('jquery', '
         jQuery(document).ready(function($) {
@@ -231,16 +287,79 @@ function stm_enqueue_scripts($hook) {
                         });
                     });
 
-                    var text = $("<span>").text(todo.text).css({
-                        "flex": "1",
-                        "margin-left": "20px",
-                        "font-size": "18px",
-                        "font-weight": "500"
+                    // View mode
+                    var viewWrapper = $("<div>").css({
+                        flex: "1",
+                        display: "flex",
+                        alignItems: "center"
                     });
 
-                    if (todo.completed) {
-                        text.css("text-decoration", "line-through").css("opacity", "0.6");
-                    }
+                    var textSpan = $("<span>").text(todo.text).css({
+                        "font-size": "18px",
+                        "font-weight": "500",
+                        flex: "1"
+                    });
+
+                    var dueSpan = $("<span>").text(todo.due_date ? "Due: " + todo.due_date : "").css({
+                        "font-size": "14px",
+                        "color": "#888",
+                        "margin-right": "20px"
+                    });
+
+                    viewWrapper.append(textSpan, dueSpan);
+
+                    // Edit mode
+                    var editForm = $("<div>").addClass("edit-form").hide();
+
+                    var editInput = $("<input type=\'text\'>").val(todo.text);
+
+                    var dateInput = $("<input type=\'text\'>").val(todo.due_date || "");
+
+                    var saveBtn = $("<button>").addClass("save-btn").text("Save");
+
+                    var cancelBtn = $("<button>").addClass("cancel-btn").text("Cancel");
+
+                    editForm.append(editInput, dateInput, saveBtn, cancelBtn);
+
+                    // Double click to edit
+                    viewWrapper.on("dblclick", function(e) {
+                        e.stopPropagation();
+                        viewWrapper.hide();
+                        editForm.show();
+                        editInput.focus();
+
+                        // Initialize flatpickr
+                        dateInput.flatpickr({
+                            dateFormat: "Y-m-d"
+                        });
+                    });
+
+                    // Cancel
+                    cancelBtn.on("click", function() {
+                        editForm.hide();
+                        viewWrapper.show();
+                    });
+
+                    // Save
+                    saveBtn.on("click", function() {
+                        var newText = editInput.val().trim();
+                        var newDue = dateInput.val().trim();
+
+                        if (!newText) return;
+
+                        $.post(ajaxurl, {
+                            action: "stm_edit_todo",
+                            todo_id: todo.id,
+                            text: newText,
+                            due_date: newDue,
+                            nonce: nonce
+                        }, function(response) {
+                            if (response.success) {
+                                renderTodos(response.data);
+                                updateProgress(response.data);
+                            }
+                        });
+                    });
 
                     var deleteBtn = $("<button>").text("Delete").css({
                         marginLeft: "20px",
@@ -257,7 +376,7 @@ function stm_enqueue_scripts($hook) {
                         $("#custom-confirm").fadeIn(200);
                     });
 
-                    li.append(checkbox, text, deleteBtn);
+                    li.append(checkbox, viewWrapper, editForm, deleteBtn);
                     list.append(li);
                 });
             }
@@ -291,7 +410,7 @@ function stm_enqueue_scripts($hook) {
                 }
             }
 
-            // Confirm dialog buttons – fixed
+            // Confirm dialog
             $(document).on("click", "#confirm-yes", function() {
                 if (pendingDeleteId !== null) {
                     $.post(ajaxurl, {
