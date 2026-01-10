@@ -1,172 +1,216 @@
 <?php
 /**
- * Plugin Name: Simple Todo Manager
+ * Plugin Name: Simple Todo Manager Pro
  * Plugin URI: https://github.com/shawon25800/simple-todo-manager
- * Description: A clean and powerful personal todo list plugin with AJAX, drag & drop, inline edit, due date, search & filter, task assignment, priorities, subtasks. Built with Grok AI 🚀
- * Version: 1.0
+ * Description: Team task manager with role-based access, assignment, notifications. Built with Grok AI 🚀
+ * Version: 3.1
  * Author: Shawon
  * Author URI: https://github.com/shawon25800
  * License: GPL2
- * Text Domain: simple-todo-manager
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-// Day 11: অ্যাডমিন মেনু
+// Global tasks
+function stm_get_todos() {
+    return get_option('stm_global_todos', array());
+}
+
+function stm_save_todos($todos) {
+    update_option('stm_global_todos', $todos);
+}
+
+// Notifications
+function stm_add_notification($user_id, $message) {
+    $notifs = get_user_meta($user_id, 'stm_notifications', true) ?: array();
+    $notifs[] = array(
+        'message' => $message,
+        'time' => current_time('mysql'),
+        'read' => false
+    );
+    update_user_meta($user_id, 'stm_notifications', array_slice($notifs, -50));
+}
+
+function stm_get_notifications($user_id) {
+    return get_user_meta($user_id, 'stm_notifications', true) ?: array();
+}
+
+function stm_mark_notifications_read($user_id) {
+    $notifs = stm_get_notifications($user_id);
+    foreach ($notifs as &$n) {
+        $n['read'] = true;
+    }
+    update_user_meta($user_id, 'stm_notifications', $notifs);
+}
+
+// AJAX - Mark notifications as read
+function stm_mark_notifications_read_ajax() {
+    check_ajax_referer('stm_nonce', 'nonce');
+    stm_mark_notifications_read(get_current_user_id());
+    wp_send_json_success();
+}
+add_action('wp_ajax_stm_mark_notifications_read', 'stm_mark_notifications_read_ajax');
+
+// Auto create page
+function stm_create_my_tasks_page() {
+    if (get_page_by_path('my-tasks')) return;
+
+    $page_id = wp_insert_post([
+        'post_title'   => 'My Tasks',
+        'post_name'    => 'my-tasks',
+        'post_content' => '',
+        'post_status'  => 'publish',
+        'post_type'    => 'page'
+    ]);
+
+    if ($page_id && !is_wp_error($page_id)) {
+        update_post_meta($page_id, '_wp_page_template', 'my-tasks-template.php');
+    }
+}
+register_activation_hook(__FILE__, 'stm_create_my_tasks_page');
+
+// Admin menu
 function stm_admin_menu() {
     add_menu_page(
-        'Todo Manager',
-        'My Todos',
-        'manage_options',
+        'Task Manager',
+        'Tasks',
+        'read',  // এটা সব logged-in user দেখবে
         'simple-todo-manager',
         'stm_todo_page',
-        '',
+        'dashicons-list-view',
         80
     );
 }
 add_action('admin_menu', 'stm_admin_menu');
 
-// Day 18: টুডু পেজ – priorities + subtasks + assignment
+// Admin Dashboard - full control
 function stm_todo_page() {
+    if (!is_user_logged_in()) {
+        wp_redirect(wp_login_url());
+        exit;
+    }
+
+    $is_admin = current_user_can('manage_options');
+    $current_user_id = get_current_user_id();
+    $all_tasks = stm_get_todos();
+
+    // CRITICAL FIX: Non-admin sees ONLY assigned tasks
+    $tasks = $all_tasks;
+    if (!$is_admin) {
+        $tasks = array_filter($all_tasks, function($task) use ($current_user_id) {
+            return isset($task['assigned_to']) && $task['assigned_to'] == $current_user_id;
+        });
+    }
+
+    // Pass filtered tasks to JS (this is what fixes the issue)
+    ?>
+    <script>
+        window.initialTasks = <?php echo json_encode(array_values($tasks)); ?>;
+    </script>
+    <?php
+
+    // Pass tasks to JS for initial render (optional, if you want to skip AJAX load)
     ?>
     <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
-        <div style="width:100%; max-width:700px; background:rgba(255,255,255,0.95); border-radius:25px; padding:50px 40px; box-shadow:0 20px 50px rgba(0,0,0,0.1); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
-            <h1 style="text-align:center; color:#333; font-size:36px; margin-bottom:50px;">My Todo List</h1>
+        <div style="width:100%; max-width:900px; background:rgba(255,255,255,0.95); border-radius:30px; padding:50px 40px; box-shadow:0 25px 60px rgba(0,0,0,0.12); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
+            <h1 style="text-align:center; color:#2c3e50; font-size:42px; margin-bottom:50px; font-weight:600;">
+                <?php echo $is_admin ? 'Full Task Manager (Admin)' : 'My Assigned Tasks'; ?>
+            </h1>
 
-            <div id="todo-app">
-                <!-- Add Task -->
-                <div style="margin-bottom:40px; text-align:center;">
+            <?php if ($is_admin): ?>
+                <!-- Admin only: Add task section -->
+                <div style="margin-bottom:50px; text-align:center;">
                     <input type="text" id="new-todo" placeholder="Add new task..." style="width:70%; padding:18px 25px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4; color:#333; outline:none; box-shadow:0 5px 15px rgba(0,0,0,0.1);" />
-                    <select id="task-priority" style="width:70%; margin-top:10px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4;">
+                    <select id="task-priority" style="width:70%; margin-top:15px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4;">
                         <option value="">Priority (optional)</option>
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
                         <option value="low">Low</option>
                     </select>
-                    <textarea id="task-subtasks" placeholder="Subtasks (one per line, optional)" style="width:70%; margin-top:10px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4; height:100px;"></textarea>
-                    <select id="task-assignee" style="width:70%; margin-top:10px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4;">
+                    <textarea id="task-subtasks" placeholder="Subtasks (one per line, optional)" style="width:70%; margin-top:15px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4; height:120px;"></textarea>
+                    <select id="task-assignee" style="width:70%; margin-top:15px; padding:18px; font-size:18px; border:none; border-radius:15px; background:#f1f3f4;">
                         <option value="">Assign to (optional)</option>
                         <?php
                         $users = get_users();
                         foreach ($users as $user) {
-                            echo '<option value="' . $user->ID . '">' . esc_html($user->display_name) . '</option>';
+                            if ($user->ID == $current_user_id) continue;
+                            echo '<option value="' . esc_attr($user->ID) . '">' . esc_html($user->display_name) . '</option>';
                         }
                         ?>
                     </select>
-                    <button id="add-todo" style="padding:18px 30px; margin-top:10px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:18px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">Add Task</button>
+                    <button id="add-todo" style="padding:18px 40px; margin-top:20px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:18px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">Add Task</button>
                 </div>
+            <?php endif; ?>
 
-                <!-- Search -->
-                <div style="margin-bottom:30px; text-align:center;">
-                    <input type="text" id="search-todo" placeholder="Search tasks..." style="width:50%; padding:15px; font-size:16px; border:1px solid #ddd; border-radius:15px; outline:none;" />
+            <div style="margin-bottom:40px; text-align:center;">
+                <input type="text" id="search-todo" placeholder="Search tasks..." style="width:60%; padding:15px; font-size:16px; border:1px solid #ddd; border-radius:15px; outline:none;" />
+            </div>
+
+            <?php if ($is_admin): ?>
+                <div style="margin-bottom:40px; text-align:center;">
+                    <button id="filter-all" class="filter-btn active" style="padding:12px 30px; margin:0 8px; background:#6c5ce7; color:white; border:none; border-radius:12px; font-size:16px; cursor:pointer;">All</button>
+                    <button id="filter-active" class="filter-btn" style="padding:12px 30px; margin:0 8px; background:#95a5a6; color:white; border:none; border-radius:12px; font-size:16px; cursor:pointer;">Active</button>
+                    <button id="filter-completed" class="filter-btn" style="padding:12px 30px; margin:0 8px; background:#27ae60; color:white; border:none; border-radius:12px; font-size:16px; cursor:pointer;">Completed</button>
+                    <button id="clear-all" style="padding:12px 30px; margin-left:40px; background:#e74c3c; color:white; border:none; border-radius:12px; font-size:16px; cursor:pointer;">Clear All</button>
                 </div>
+            <?php endif; ?>
 
-                <!-- Filter + Clear All -->
-                <div style="margin-bottom:30px; text-align:center;">
-                    <button id="filter-all" class="filter-btn active" style="padding:10px 20px; margin:0 5px; background:#6c5ce7; color:white; border:none; border-radius:10px;">All</button>
-                    <button id="filter-active" class="filter-btn" style="padding:10px 20px; margin:0 5px; background:#95a5a6; color:white; border:none; border-radius:10px;">Active</button>
-                    <button id="filter-completed" class="filter-btn" style="padding:10px 20px; margin:0 5px; background:#27ae60; color:white; border:none; border-radius:10px;">Completed</button>
-                    <button id="clear-all" style="padding:10px 20px; margin-left:30px; background:#e74c3c; color:white; border:none; border-radius:10px;">Clear All</button>
-                </div>
+            <ul id="todo-list" style="list-style:none; padding:0;"></ul>
+            <div id="progress" style="margin-top:60px; text-align:center; color:#555; font-size:20px; font-weight:500;"></div>
+        </div>
+    </div>
 
-                <ul id="todo-list" style="list-style:none; padding:0;"></ul>
-
-                <div id="progress" style="margin-top:50px; text-align:center; color:#555; font-size:20px;"></div>
+    <!-- Admin only confirm dialogs -->
+    <?php if ($is_admin): ?>
+        <div id="custom-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; backdrop-filter:blur(5px);">
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; max-width:420px; width:90%;">
+                <p style="font-size:20px; margin-bottom:40px; color:#333;">Are you sure you want to delete this task?</p>
+                <button id="confirm-yes" style="padding:14px 40px; background:#e74c3c; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Yes, Delete</button>
+                <button id="confirm-no" style="padding:14px 40px; background:#95a5a6; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Cancel</button>
             </div>
         </div>
-    </div>
 
-    <!-- Confirm Dialogs -->
-    <div id="custom-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
-        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 15px 40px rgba(0,0,0,0.3); text-align:center; max-width:400px; width:90%;">
-            <p style="font-size:20px; margin-bottom:40px; color:#333;">Are you sure you want to delete this task?</p>
-            <button id="confirm-yes" style="padding:12px 30px; background:#e74c3c; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Yes, Delete</button>
-            <button id="confirm-no" style="padding:12px 30px; background:#95a5a6; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Cancel</button>
+        <div id="clear-all-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; backdrop-filter:blur(5px);">
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; max-width:420px; width:90%;">
+                <p style="font-size:20px; margin-bottom:40px; color:#333;">Delete ALL tasks?<br><strong>This cannot be undone!</strong></p>
+                <button id="clear-all-yes" style="padding:14px 40px; background:#e74c3c; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Yes, Delete All</button>
+                <button id="clear-all-no" style="padding:14px 40px; background:#95a5a6; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Cancel</button>
+            </div>
         </div>
-    </div>
+    <?php endif; ?>
 
-    <div id="clear-all-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999;">
-        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 15px 40px rgba(0,0,0,0.3); text-align:center; max-width:400px; width:90%;">
-            <p style="font-size:20px; margin-bottom:40px; color:#333;">Delete ALL tasks?<br><strong>This cannot be undone!</strong></p>
-            <button id="clear-all-yes" style="padding:12px 30px; background:#e74c3c; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Yes, Delete All</button>
-            <button id="clear-all-no" style="padding:12px 30px; background:#95a5a6; color:white; border:none; border-radius:12px; margin:0 15px; cursor:pointer; font-size:16px;">Cancel</button>
-        </div>
-    </div>
+    <script>
+        window.initialTasks = <?php echo json_encode(array_values($tasks)); ?>;
+    </script>
 
     <style>
-        #todo-list li {
-            cursor: move;
-        }
-        .sortable-ghost {
-            opacity: 0.4;
-        }
-        .edit-form {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 1;
-        }
-        .edit-form input, .edit-form textarea {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            font-size: 16px;
-        }
-        .edit-form input[type="text"], .edit-form textarea {
-            flex: 1;
-        }
-        .edit-form button {
-            padding: 8px 15px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            color: white;
-        }
-        .edit-form .save-btn {
-            background: #27ae60;
-        }
-        .edit-form .cancel-btn {
-            background: #95a5a6;
+        .filter-btn.active {
+            background: #6c5ce7 !important;
         }
         .priority-high { color: #e74c3c; font-weight: bold; }
         .priority-medium { color: #f39c12; }
         .priority-low { color: #27ae60; }
-        .subtasks {
-            margin-top: 10px;
-            font-size: 14px;
-            color: #555;
-        }
-        .subtasks ul {
-            margin: 5px 0 0 20px;
-            padding: 0;
-        }
+        .subtasks ul { margin: 10px 0 0 20px; padding: 0; font-size: 14px; color: #555; }
     </style>
     <?php
 }
-
-// Day 12: টুডু ডাটা সেভ + লোড
-function stm_get_todos() {
-    $todos = get_user_meta(get_current_user_id(), 'stm_todos', true);
-    return $todos ? $todos : array();
-}
-
-function stm_save_todos($todos) {
-    update_user_meta(get_current_user_id(), 'stm_todos', $todos);
-}
-
-// Day 18: AJAX - নতুন টাস্ক অ্যাড + priority + subtasks + assignment + email
+// AJAX handlers with role checks
 function stm_add_todo() {
     check_ajax_referer('stm_nonce', 'nonce');
 
-    $text = sanitize_text_field($_POST['text']);
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Only admin can add tasks']);
+    }
+
+    $text = sanitize_text_field($_POST['text'] ?? '');
     $priority = sanitize_text_field($_POST['priority'] ?? '');
     $subtasks = array_filter(array_map('sanitize_text_field', explode("\n", $_POST['subtasks'] ?? '')));
     $assignee_id = intval($_POST['assignee'] ?? 0);
 
     if (empty($text)) {
-        wp_send_json_error('Task cannot be empty');
+        wp_send_json_error(['message' => 'Task text is required']);
     }
 
     $todos = stm_get_todos();
@@ -185,73 +229,70 @@ function stm_add_todo() {
     stm_save_todos($todos);
 
     if ($assignee_id) {
-        $user = get_user_by('id', $assignee_id);
-        $subject = "New Task Assigned: $text";
-        $message = "Hello {$user->display_name},\n\nA new task has been assigned to you:\n\n$text\n\nLogin to view your tasks.";
-        wp_mail($user->user_email, $subject, $message);
+        stm_add_notification($assignee_id, "New task assigned: " . $text);
     }
 
     wp_send_json_success($todos);
 }
 add_action('wp_ajax_stm_add_todo', 'stm_add_todo');
-
-// Day 12: AJAX - টুডু লোড
 function stm_load_todos() {
-    wp_send_json_success(stm_get_todos());
+    $todos = stm_get_todos();
+    if (!current_user_can('manage_options')) {
+        $current_user_id = get_current_user_id();
+        $todos = array_filter($todos, function($task) use ($current_user_id) {
+            return isset($task['assigned_to']) && $task['assigned_to'] == $current_user_id;
+        });
+    }
+    wp_send_json_success(array_values($todos));
 }
 add_action('wp_ajax_stm_load_todos', 'stm_load_todos');
 
-// Day 13: AJAX - কমপ্লিট মার্ক টগল
 function stm_toggle_complete() {
     check_ajax_referer('stm_nonce', 'nonce');
+
     $todo_id = intval($_POST['todo_id']);
     $todos = stm_get_todos();
+    $user_id = get_current_user_id();
+
     foreach ($todos as &$todo) {
         if ($todo['id'] == $todo_id) {
+            if ($todo['assigned_to'] != $user_id && !current_user_can('manage_options')) {
+                wp_send_json_error('Unauthorized');
+            }
+
+            $old_status = $todo['completed'];
             $todo['completed'] = !$todo['completed'];
+
+            if (!$old_status && $todo['completed'] && $todo['assigned_to']) {
+                $admins = get_users(array('role' => 'administrator'));
+                foreach ($admins as $admin) {
+                    stm_add_notification($admin->ID, get_user_by('id', $todo['assigned_to'])->display_name . " completed task: " . $todo['text']);
+                }
+            }
             break;
         }
     }
+
     stm_save_todos($todos);
     wp_send_json_success($todos);
 }
 add_action('wp_ajax_stm_toggle_complete', 'stm_toggle_complete');
 
-// Day 13: AJAX - টাস্ক ডিলিট
+// Delete, edit, clear – admin only
 function stm_delete_todo() {
     check_ajax_referer('stm_nonce', 'nonce');
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
     $todo_id = intval($_POST['todo_id']);
     $todos = stm_get_todos();
-    $new_todos = array_filter($todos, function($todo) use ($todo_id) {
-        return $todo['id'] != $todo_id;
-    });
+    $new_todos = array_filter($todos, fn($t) => $t['id'] != $todo_id);
     stm_save_todos(array_values($new_todos));
     wp_send_json_success($new_todos);
 }
 add_action('wp_ajax_stm_delete_todo', 'stm_delete_todo');
 
-// Day 14: AJAX - অর্ডার সেভ
-function stm_update_todo_order() {
-    check_ajax_referer('stm_nonce', 'nonce');
-    $order = array_map('intval', $_POST['order']);
-    $todos = stm_get_todos();
-    $ordered_todos = [];
-    foreach ($order as $id) {
-        foreach ($todos as $todo) {
-            if ($todo['id'] == $id) {
-                $ordered_todos[] = $todo;
-                break;
-            }
-        }
-    }
-    stm_save_todos($ordered_todos);
-    wp_send_json_success();
-}
-add_action('wp_ajax_stm_update_todo_order', 'stm_update_todo_order');
-
-// Day 15: AJAX - টাস্ক এডিট + due date
 function stm_edit_todo() {
     check_ajax_referer('stm_nonce', 'nonce');
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
     $todo_id = intval($_POST['todo_id']);
     $text = sanitize_text_field($_POST['text']);
     $due_date = sanitize_text_field($_POST['due_date']);
@@ -268,15 +309,32 @@ function stm_edit_todo() {
 }
 add_action('wp_ajax_stm_edit_todo', 'stm_edit_todo');
 
-// Day 16: AJAX - Clear All
 function stm_clear_all_todos() {
     check_ajax_referer('stm_nonce', 'nonce');
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
     stm_save_todos(array());
     wp_send_json_success();
 }
 add_action('wp_ajax_stm_clear_all_todos', 'stm_clear_all_todos');
 
-// Day 18: Enqueue + Fixed Inline Edit + Priorities + Subtasks
+function stm_update_todo_order() {
+    check_ajax_referer('stm_nonce', 'nonce');
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
+    wp_send_json_success();
+}
+add_action('wp_ajax_stm_update_todo_order', 'stm_update_todo_order');
+
+// Force redirect non-admin to /my-tasks on login
+function stm_force_redirect_non_admin($redirect_to, $request, $user) {
+    // If user is object and not admin
+    if (is_object($user) && isset($user->ID) && !user_can($user, 'manage_options')) {
+        return home_url('/my-tasks');
+    }
+    return $redirect_to;
+}
+add_filter('login_redirect', 'stm_force_redirect_non_admin', 9999, 3); // very high priority
+
+// Enqueue admin scripts
 function stm_enqueue_scripts($hook) {
     if ($hook !== 'toplevel_page_simple-todo-manager') {
         return;
@@ -284,15 +342,15 @@ function stm_enqueue_scripts($hook) {
 
     wp_enqueue_script('jquery');
     wp_enqueue_script('sortable-js', 'https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js', array('jquery'), '1.15.2', true);
-
     wp_enqueue_style('flatpickr-css', 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css');
     wp_enqueue_script('flatpickr-js', 'https://cdn.jsdelivr.net/npm/flatpickr', array('jquery'), null, true);
 
     wp_add_inline_script('jquery', '
         jQuery(document).ready(function($) {
             var nonce = "' . wp_create_nonce('stm_nonce') . '";
-            var pendingDeleteId = null;
+            var isAdmin = ' . (current_user_can('manage_options') ? 'true' : 'false') . ';
             var currentFilter = "all";
+            var pendingDeleteId = null;
 
             function loadTodos() {
                 $.post(ajaxurl, {
@@ -302,7 +360,7 @@ function stm_enqueue_scripts($hook) {
                     if (response.success) {
                         renderTodos(response.data);
                         updateProgress(response.data);
-                        initSortable();
+                        if (isAdmin) initSortable();
                     }
                 });
             }
@@ -329,7 +387,7 @@ function stm_enqueue_scripts($hook) {
                         display: "flex",
                         alignItems: "center",
                         color: "#333",
-                        cursor: "move"
+                        cursor: isAdmin ? "move" : "default"
                     });
 
                     var checkbox = $("<input type=\'checkbox\'>").prop("checked", todo.completed).css({
@@ -366,8 +424,7 @@ function stm_enqueue_scripts($hook) {
                     });
 
                     if (todo.priority) {
-                        var priorityClass = "priority-" + todo.priority;
-                        textSpan.addClass(priorityClass);
+                        textSpan.addClass("priority-" + todo.priority);
                     }
 
                     var dueSpan = $("<span>").text(todo.due_date ? "Due: " + todo.due_date : "").css({
@@ -395,74 +452,77 @@ function stm_enqueue_scripts($hook) {
 
                     viewWrapper.append(headerDiv, subtasksDiv);
 
-                    // Edit form
-                    var editForm = $("<div>").addClass("edit-form").hide();
+                    if (isAdmin) {
+                        var editForm = $("<div>").addClass("edit-form").hide();
 
-                    var editInput = $("<input type=\'text\'>").val(todo.text);
+                        var editInput = $("<input type=\'text\'>").val(todo.text);
 
-                    var dateInput = $("<input type=\'text\'>").val(todo.due_date || "");
+                        var dateInput = $("<input type=\'text\'>").val(todo.due_date || "");
 
-                    var saveBtn = $("<button>").addClass("save-btn").text("Save");
+                        var saveBtn = $("<button>").addClass("save-btn").text("Save");
 
-                    var cancelBtn = $("<button>").addClass("cancel-btn").text("Cancel");
+                        var cancelBtn = $("<button>").addClass("cancel-btn").text("Cancel");
 
-                    editForm.append(editInput, dateInput, saveBtn, cancelBtn);
+                        editForm.append(editInput, dateInput, saveBtn, cancelBtn);
 
-                    // Store old values for cancel
-                    var oldText = todo.text;
-                    var oldDue = todo.due_date || "";
+                        var oldText = todo.text;
+                        var oldDue = todo.due_date || "";
 
-                    viewWrapper.on("dblclick", function(e) {
-                        e.stopPropagation();
-                        viewWrapper.hide();
-                        editForm.show();
-                        editInput.focus();
-                        if (!dateInput.hasClass("flatpickr-input")) {
-                            dateInput.flatpickr({
-                                dateFormat: "Y-m-d"
-                            });
-                        }
-                    });
-
-                    cancelBtn.on("click", function() {
-                        editInput.val(oldText);
-                        dateInput.val(oldDue);
-                        editForm.hide();
-                        viewWrapper.show();
-                    });
-
-                    saveBtn.on("click", function() {
-                        var newText = editInput.val().trim();
-                        var newDue = dateInput.val().trim();
-                        if (!newText) return;
-
-                        $.post(ajaxurl, {
-                            action: "stm_edit_todo",
-                            todo_id: todo.id,
-                            text: newText,
-                            due_date: newDue,
-                            nonce: nonce
-                        }, function() {
-                            loadTodos();
+                        viewWrapper.on("dblclick", function(e) {
+                            e.stopPropagation();
+                            viewWrapper.hide();
+                            editForm.show();
+                            editInput.focus();
+                            if (!dateInput.hasClass("flatpickr-input")) {
+                                dateInput.flatpickr({
+                                    dateFormat: "Y-m-d"
+                                });
+                            }
                         });
-                    });
 
-                    var deleteBtn = $("<button>").text("Delete").css({
-                        marginLeft: "20px",
-                        background: "#e74c3c",
-                        color: "white",
-                        border: "none",
-                        padding: "10px 20px",
-                        borderRadius: "12px",
-                        cursor: "pointer"
-                    });
+                        cancelBtn.on("click", function() {
+                            editInput.val(oldText);
+                            dateInput.val(oldDue);
+                            editForm.hide();
+                            viewWrapper.show();
+                        });
 
-                    deleteBtn.on("click", function() {
-                        pendingDeleteId = todo.id;
-                        $("#custom-confirm").fadeIn(200);
-                    });
+                        saveBtn.on("click", function() {
+                            var newText = editInput.val().trim();
+                            var newDue = dateInput.val().trim();
+                            if (!newText) return;
 
-                    li.append(checkbox, viewWrapper, editForm, deleteBtn);
+                            $.post(ajaxurl, {
+                                action: "stm_edit_todo",
+                                todo_id: todo.id,
+                                text: newText,
+                                due_date: newDue,
+                                nonce: nonce
+                            }, function() {
+                                loadTodos();
+                            });
+                        });
+
+                        var deleteBtn = $("<button>").text("Delete").css({
+                            marginLeft: "20px",
+                            background: "#e74c3c",
+                            color: "white",
+                            border: "none",
+                            padding: "10px 20px",
+                            borderRadius: "12px",
+                            cursor: "pointer"
+                        });
+
+                        deleteBtn.on("click", function() {
+                            pendingDeleteId = todo.id;
+                            $("#custom-confirm").fadeIn(200);
+                        });
+
+                        li.append(checkbox, viewWrapper, editForm, deleteBtn);
+                    } else {
+                        li.append(checkbox, viewWrapper);
+                    }
+
                     list.append(li);
                 });
 
@@ -478,7 +538,7 @@ function stm_enqueue_scripts($hook) {
 
             function initSortable() {
                 var el = document.getElementById("todo-list");
-                if (el && typeof Sortable !== "undefined") {
+                if (el && typeof Sortable !== "undefined" && isAdmin) {
                     Sortable.create(el, {
                         animation: 150,
                         ghostClass: "sortable-ghost",
@@ -498,12 +558,10 @@ function stm_enqueue_scripts($hook) {
                 }
             }
 
-            // Search
             $("#search-todo").on("input", function() {
                 loadTodos();
             });
 
-            // Filter
             $(document).on("click", ".filter-btn", function() {
                 $(".filter-btn").removeClass("active").css("background", "#95a5a6");
                 $(this).addClass("active").css("background", "#6c5ce7");
@@ -511,7 +569,6 @@ function stm_enqueue_scripts($hook) {
                 loadTodos();
             });
 
-            // Clear All
             $("#clear-all").on("click", function() {
                 $("#clear-all-confirm").fadeIn(200);
             });
@@ -530,7 +587,6 @@ function stm_enqueue_scripts($hook) {
                 $("#clear-all-confirm").fadeOut(200);
             });
 
-            // Single delete
             $(document).on("click", "#confirm-yes", function() {
                 if (pendingDeleteId !== null) {
                     $.post(ajaxurl, {
@@ -550,14 +606,16 @@ function stm_enqueue_scripts($hook) {
                 pendingDeleteId = null;
             });
 
-            // Add Task
             $("#add-todo").on("click", function() {
                 var text = $("#new-todo").val().trim();
                 var priority = $("#task-priority").val();
                 var subtasks = $("#task-subtasks").val();
                 var assignee = $("#task-assignee").val() || 0;
 
-                if (!text) return;
+                if (!text) {
+                    alert("Task text is required!");
+                    return;
+                }
 
                 $.post(ajaxurl, {
                     action: "stm_add_todo",
@@ -573,7 +631,15 @@ function stm_enqueue_scripts($hook) {
                         $("#task-subtasks").val("");
                         $("#task-assignee").val("");
                         loadTodos();
+                        alert("Task added successfully!");
+                    } else {
+                        alert("Error: " + (response.data?.message || "Something went wrong"));
+                        console.log("Server response:", response);
                     }
+                }).fail(function(jqXHR, textStatus, errorThrown) {
+                    alert("AJAX failed! Check console for details.");
+                    console.error("AJAX error:", textStatus, errorThrown);
+                    console.log("Response:", jqXHR.responseText);
                 });
             });
 
