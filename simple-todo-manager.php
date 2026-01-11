@@ -116,6 +116,67 @@ function stm_todo_page() {
     <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
         <div style="width:100%; max-width:900px; background:rgba(255,255,255,0.95); border-radius:30px; padding:50px 40px; box-shadow:0 25px 60px rgba(0,0,0,0.12); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
             <h1 style="text-align:center; color:#2c3e50; font-size:42px; margin-bottom:50px; font-weight:600;">
+                <!-- Bell Icon + Badge -->
+<div id="notification-bell" style="position:absolute; top:40px; right:40px; cursor:pointer; font-size:34px; z-index:100;">
+    <!-- Sundor 3D Animated Bell -->
+<svg id="bell-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3)); transition: transform 0.3s ease;">
+  <path d="M18 8C18 6.4087 17.3679 4.88258 16.2426 3.75736C15.1174 2.63214 13.5913 2 12 2C10.4087 2 8.88258 2.63214 7.75736 3.75736C6.63214 4.88258 6 6.4087 6 8V14L4 16V17H20V16L18 14V8Z" fill="url(#bellGradient)"/>
+  <path d="M9.5 21C9.5 21.8284 10.1716 22.5 11 22.5C11.8284 22.5 12.5 21.8284 12.5 21H9.5Z" fill="#6c5ce7"/>
+  <defs>
+    <linearGradient id="bellGradient" x1="6" y1="2" x2="18" y2="22" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6c5ce7"/>
+      <stop offset="1" stop-color="#a29bfe"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<style>
+  #bell-icon:hover {
+    transform: scale(1.15) rotate(15deg);
+    animation: ring 0.8s ease-in-out;
+  }
+  @keyframes ring {
+    0% { transform: rotate(0deg); }
+    10% { transform: rotate(-15deg); }
+    20% { transform: rotate(15deg); }
+    30% { transform: rotate(-10deg); }
+    40% { transform: rotate(10deg); }
+    50% { transform: rotate(0deg); }
+    100% { transform: rotate(0deg); }
+  }
+</style>
+    <?php
+    $notifs = stm_get_notifications(get_current_user_id());
+    $unread = count(array_filter($notifs, function($n) { return !$n['read']; }));
+    if ($unread > 0):
+    ?>
+        <span id="unread-count" style="position:absolute; top:-12px; right:-12px; background:#e74c3c; color:white; border-radius:50%; width:26px; height:26px; font-size:12px; font-weight:bold; display:flex; align-items:center; justify-content:center;">
+            <?php echo $unread; ?>
+        </span>
+    <?php endif; ?>
+</div>
+
+<!-- Dropdown Box -->
+<div id="notification-dropdown" style="display:none; position:absolute; top:90px; right:20px; width:400px; background:rgba(255,255,255,0.98); border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.25); z-index:1000; max-height:480px; overflow-y:auto; backdrop-filter:blur(12px);">
+    <div style="padding:20px; border-bottom:1px solid #eee; text-align:center;">
+        <strong style="font-size:22px;">Notifications</strong>
+    </div>
+    <div style="padding:15px;">
+        <?php
+        if (empty($notifs)) {
+            echo '<p style="text-align:center; color:#888; padding:40px 0;">No notifications yet.</p>';
+        } else {
+            foreach ($notifs as $n) {
+                $bg = !$n['read'] ? 'background:rgba(108,92,231,0.08);' : 'background:#f8f9fa;';
+                echo '<div style="padding:15px; margin-bottom:10px; border-radius:12px; ' . $bg . '">';
+                echo '<p style="margin:0 0 6px 0; font-size:15px;">' . esc_html($n['message']) . '</p>';
+                echo '<small style="color:#888; font-size:13px;">' . human_time_diff(strtotime($n['time']), current_time('timestamp')) . ' ago</small>';
+                echo '</div>';
+            }
+        }
+        ?>
+    </div>
+</div>
                 <?php echo $is_admin ? 'Full Task Manager (Admin)' : 'My Assigned Tasks'; ?>
             </h1>
 
@@ -163,6 +224,7 @@ function stm_todo_page() {
     </div>
 
     <!-- Admin only confirm dialogs -->
+     
     <?php if ($is_admin): ?>
         <div id="custom-confirm" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:9999; backdrop-filter:blur(5px);">
             <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:40px; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; max-width:420px; width:90%;">
@@ -180,7 +242,14 @@ function stm_todo_page() {
             </div>
         </div>
     <?php endif; ?>
-
+<!-- Custom Success Popup -->
+<div id="success-popup" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; backdrop-filter:blur(5px);">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(255,255,255,0.95); border-radius:25px; padding:40px; box-shadow:0 20px 60px rgba(0,0,0,0.3); text-align:center; max-width:400px; width:90%; backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
+        <h2 style="color:#2c3e50; font-size:28px; margin-bottom:20px;">Success!</h2>
+        <p style="font-size:18px; color:#555; margin-bottom:30px;">Task added successfully.</p>
+        <button id="close-success" style="padding:12px 40px; background:#6c5ce7; color:white; border:none; border-radius:15px; font-size:16px; cursor:pointer; box-shadow:0 5px 15px rgba(108,92,231,0.4);">OK</button>
+    </div>
+</div>
     <script>
         window.initialTasks = <?php echo json_encode(array_values($tasks)); ?>;
     </script>
@@ -352,7 +421,8 @@ function stm_enqueue_scripts($hook) {
             var currentFilter = "all";
             var pendingDeleteId = null;
 
-            function loadTodos() {
+            function loadTodos()
+             {
                 $.post(ajaxurl, {
                     action: "stm_load_todos",
                     nonce: nonce
@@ -403,9 +473,32 @@ function stm_enqueue_scripts($hook) {
                             nonce: nonce
                         }, function() {
                             loadTodos();
+                            
                         });
                     });
+// Notification bell & dropdown - 100% fixed version
+$("#notification-bell").on("click", function(e) {
+    e.preventDefault();          // no default action
+    e.stopImmediatePropagation(); // stop all bubbling instantly
+    $("#notification-dropdown").toggle(200); // smooth toggle
 
+    if ($("#notification-dropdown").is(":visible") && $("#unread-count").length > 0) {
+        $.post(ajaxurl, {
+            action: "stm_mark_notifications_read",
+            nonce: nonce
+        }, function() {
+            $("#unread-count").fadeOut(300, function() { $(this).remove(); });
+        });
+    }
+});
+
+// Outside click close - super safe version
+$(document).on("click", function(e) {
+    // যদি ক্লিক dropdown বা bell-এর ভিতরে না হয় তবেই close
+    if (!$(e.target).closest("#notification-dropdown, #notification-bell").length) {
+        $("#notification-dropdown").hide(200);
+    }
+});
                     var viewWrapper = $("<div>").css({
                         flex: "1",
                         display: "flex",
@@ -607,47 +700,54 @@ function stm_enqueue_scripts($hook) {
             });
 
             $("#add-todo").on("click", function() {
-                var text = $("#new-todo").val().trim();
-                var priority = $("#task-priority").val();
-                var subtasks = $("#task-subtasks").val();
-                var assignee = $("#task-assignee").val() || 0;
+    var text = $("#new-todo").val().trim();
+    var priority = $("#task-priority").val();
+    var subtasks = $("#task-subtasks").val();
+    var assignee = $("#task-assignee").val() || 0;
 
-                if (!text) {
-                    alert("Task text is required!");
-                    return;
-                }
+    if (!text) {
+        alert("Task text is required!");
+        return;
+    }
 
-                $.post(ajaxurl, {
-                    action: "stm_add_todo",
-                    text: text,
-                    priority: priority,
-                    subtasks: subtasks,
-                    assignee: assignee,
-                    nonce: nonce
-                }, function(response) {
-                    if (response.success) {
-                        $("#new-todo").val("");
-                        $("#task-priority").val("");
-                        $("#task-subtasks").val("");
-                        $("#task-assignee").val("");
-                        loadTodos();
-                        alert("Task added successfully!");
-                    } else {
-                        alert("Error: " + (response.data?.message || "Something went wrong"));
-                        console.log("Server response:", response);
-                    }
-                }).fail(function(jqXHR, textStatus, errorThrown) {
-                    alert("AJAX failed! Check console for details.");
-                    console.error("AJAX error:", textStatus, errorThrown);
-                    console.log("Response:", jqXHR.responseText);
-                });
-            });
+    $.post(ajaxurl, {
+        action: "stm_add_todo",
+        text: text,
+        priority: priority,
+        subtasks: subtasks,
+        assignee: assignee,
+        nonce: nonce
+    }, function(response) {
+        if (response.success) {
+            $("#new-todo").val("");
+            $("#task-priority").val("");
+            $("#task-subtasks").val("");
+            $("#task-assignee").val("");
+            loadTodos();
 
-            $("#new-todo").on("keypress", function(e) {
-                if (e.which == 13) {
-                    $("#add-todo").click();
-                }
-            });
+            // Show custom glassmorphism popup
+            $("#success-popup").fadeIn(300);
+        } else {
+            alert("Error: " + (response.data?.message || "Something went wrong"));
+            console.log("Server response:", response);
+        }
+    }).fail(function(jqXHR, textStatus, errorThrown) {
+        alert("AJAX failed! Check console.");
+        console.error("AJAX error:", textStatus, errorThrown);
+    });
+});
+
+// Close popup
+$("#close-success").on("click", function() {
+    $("#success-popup").fadeOut(300);
+});
+
+// Close on outside click
+$("#success-popup").on("click", function(e) {
+    if (e.target === this) {
+        $(this).fadeOut(300);
+    }
+});
 
             loadTodos();
         });
