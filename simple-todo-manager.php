@@ -116,7 +116,10 @@ function stm_todo_page() {
     <div class="wrap" style="background:#fff; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;">
         <div style="width:100%; max-width:900px; background:rgba(255,255,255,0.95); border-radius:30px; padding:50px 40px; box-shadow:0 25px 60px rgba(0,0,0,0.12); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);">
             <h1 style="text-align:center; color:#2c3e50; font-size:42px; margin-bottom:50px; font-weight:600;">
-                <!-- Bell Icon + Badge -->
+                <!-- Premium Dark Mode Toggle -->
+<button id="dark-mode-toggle" style="position:absolute; top:40px; left:40px; padding:12px 24px; background:linear-gradient(135deg, #6c5ce7, #a29bfe); color:white; border:none; border-radius:12px; cursor:pointer; font-size:16px; font-weight:500; box-shadow:0 4px 15px rgba(108,92,231,0.4); transition:all 0.3s ease; z-index:100;">
+    Toggle Dark Mode
+</button> <!-- Bell Icon + Badge -->
 <div id="notification-bell" style="position:absolute; top:40px; right:40px; cursor:pointer; font-size:34px; z-index:100;">
     <!-- Sundor 3D Animated Bell -->
 <svg id="bell-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3)); transition: transform 0.3s ease;">
@@ -156,20 +159,20 @@ function stm_todo_page() {
     <?php endif; ?>
 </div>
 
-<!-- Dropdown Box -->
-<div id="notification-dropdown" style="display:none; position:absolute; top:90px; right:20px; width:400px; background:rgba(255,255,255,0.98); border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.25); z-index:1000; max-height:480px; overflow-y:auto; backdrop-filter:blur(12px);">
-    <div style="padding:20px; border-bottom:1px solid #eee; text-align:center;">
-        <strong style="font-size:22px;">Notifications</strong>
+<!-- Notification Dropdown – Premium with Dark Mode Support -->
+<div id="notification-dropdown" class="notification-dropdown glass-dropdown" style="display:none; position:absolute; top:90px; right:20px; width:400px; background:rgba(255,255,255,0.98); border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.25); z-index:1000; max-height:480px; overflow-y:auto; backdrop-filter:blur(12px); transition: all 0.3s ease;">
+    <div class="dropdown-header" style="padding:20px; border-bottom:1px solid #eee; text-align:center; background:rgba(108,92,231,0.05);">
+        <strong style="font-size:22px; color:#2c3e50;">Notifications</strong>
     </div>
-    <div style="padding:15px;">
+    <div class="notification-list" style="padding:15px;">
         <?php
         if (empty($notifs)) {
-            echo '<p style="text-align:center; color:#888; padding:40px 0;">No notifications yet.</p>';
+            echo '<p style="text-align:center; color:#888; padding:40px 0; font-size:16px;">No notifications yet.</p>';
         } else {
             foreach ($notifs as $n) {
                 $bg = !$n['read'] ? 'background:rgba(108,92,231,0.08);' : 'background:#f8f9fa;';
                 echo '<div style="padding:15px; margin-bottom:10px; border-radius:12px; ' . $bg . '">';
-                echo '<p style="margin:0 0 6px 0; font-size:15px;">' . esc_html($n['message']) . '</p>';
+                echo '<p style="margin:0 0 6px 0; font-size:15px; color:#888;">' . esc_html($n['message']) . '</p>';
                 echo '<small style="color:#888; font-size:13px;">' . human_time_diff(strtotime($n['time']), current_time('timestamp')) . ' ago</small>';
                 echo '</div>';
             }
@@ -434,7 +437,18 @@ function stm_enqueue_scripts($hook) {
                     }
                 });
             }
+// Premium Dark Mode Toggle
+$("#dark-mode-toggle").on("click", function() {
+    $("body").toggleClass("dark-mode");
+    localStorage.setItem("darkMode", $("body").hasClass("dark-mode") ? "enabled" : "disabled");
+    // Optional: smooth transition
+    $("body").css("transition", "background 0.5s ease, color 0.5s ease");
+});
 
+// Load saved preference
+if (localStorage.getItem("darkMode") === "enabled") {
+    $("body").addClass("dark-mode");
+}
             function renderTodos(todos) {
                 var searchVal = $("#search-todo").val().toLowerCase();
                 var filtered = todos.filter(function(todo) {
@@ -753,4 +767,106 @@ $("#success-popup").on("click", function(e) {
         });
     ');
 }
+
 add_action('admin_enqueue_scripts', 'stm_enqueue_scripts');
+add_action('admin_head', 'stm_premium_dark_mode');
+add_action('wp_head', 'stm_premium_dark_mode');
+
+function stm_premium_dark_mode() {
+    ?>
+    <style>
+        body.dark-mode {
+            background: #0f0f11 !important;
+            color: #e5e7eb !important;
+        }
+        body.dark-mode .wrap {
+            background: #0f0f11 !important;
+        }
+        body.dark-mode .glass-container,  /* তোমার main glass div-এর class দাও যেটা background:rgba(255,255,255,0.95) */
+        body.dark-mode div[style*="background:rgba(255,255,255,0.95)"] {
+            background: rgba(30, 30, 35, 0.92) !important;
+            border: 1px solid rgba(255,255,255,0.08) !important;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6) !important;
+            backdrop-filter: blur(12px) !important;
+        }
+        body.dark-mode h1, body.dark-mode h2 {
+            color: #f3f4f6 !important;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        body.dark-mode input, body.dark-mode select, body.dark-mode textarea {
+            background: #1f1f24 !important;
+            color: #e5e7eb !important;
+            border: 1px solid #374151 !important;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.4);
+        }
+        body.dark-mode input::placeholder {
+            color: #9ca3af !important;
+        }
+        body.dark-mode button {
+            background: linear-gradient(135deg, #6c5ce7, #a29bfe) !important;
+            color: white !important;
+            border: none !important;
+            box-shadow: 0 4px 15px rgba(108,92,231,0.4) !important;
+        }
+        body.dark-mode button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(108,92,231,0.6) !important;
+        }
+        body.dark-mode #todo-list li {
+            background: rgba(31,41,55,0.9) !important;
+            border: 1px solid #374151 !important;
+            color: #e5e7eb !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        body.dark-mode #progress {
+            color: #9ca3af !important;
+        }
+        body.dark-mode .filter-btn.active {
+            background: linear-gradient(135deg, #6c5ce7, #a29bfe) !important;
+            color: white !important;
+        }
+        body.dark-mode .subtasks ul {
+            color: #d1d5db !important;
+        }
+        /* Bell icon dark mode fix */
+        body.dark-mode #notification-bell svg {
+            filter: drop-shadow(0 4px 10px rgba(108,92,231,0.6));
+        }
+        /* Dark Mode - Notification Dropdown Premium Fix */
+body.dark-mode .glass-dropdown {
+    background: rgba(30, 30, 35, 0.95) !important;
+    border: 1px solid rgba(108, 92, 231, 0.2) !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7) !important;
+    color: #e5e7eb !important;
+}
+
+body.dark-mode .dropdown-header {
+    border-bottom: 1px solid #374151 !important;
+    background: rgba(108, 92, 231, 0.12) !important;
+}
+
+body.dark-mode .dropdown-header strong {
+    color: #c4b5fd !important;
+}
+
+body.dark-mode .notification-list > div {
+    background: rgba(31, 41, 55, 0.85) !important;
+    border: 1px solid #374151 !important;
+    color: #e5e7eb !important;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+body.dark-mode .notification-list > div:not([style*="background"]) {
+    background: rgba(31, 41, 55, 0.6) !important;
+}
+
+/* Badge in dark mode */
+body.dark-mode .unread-badge {
+    background: #ef4444 !important;
+    box-shadow: 0 2px 8px rgba(239,68,68,0.5);
+}
+    </style>
+    <?php
+}
